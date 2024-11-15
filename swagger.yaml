@@ -1,0 +1,64 @@
+swagger: "2.0"
+info:
+  title: Bookstore API
+  description: API for managing a bookstore system
+  version: "1.0.0"
+paths:
+  /admin/add_book:
+    post:
+      summary: Add a new book to the store
+      security:
+        - bearerAuth: []
+      responses:
+        201:
+          description: Book added successfully
+        400:
+          description: Bad request
+  /admin/update_book/{book_id}:
+    put:
+      summary: Update an existing book in the store
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: book_id
+          in: path
+          required: true
+          type: integer
+          description: ID of the book to update
+      responses:
+        200:
+          description: Book updated successfully
+        404:
+          description: Book not found
+  /admin/delete_book/{book_id}:
+    delete:
+      summary: Delete a book from the store
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: book_id
+          in: path
+          required: true
+          type: integer
+          description: ID of the book to delete
+      responses:
+        200:
+          description: Book deleted successfully
+        404:
+          description: Book not found
+  /user/register:
+    post:
+      summary: Register a new user
+      responses:
+        201:
+          description: User registered successfully
+        400:
+          description: Email already registered
+  /user/login:
+    post:
+      summary: Login a user
+      responses:
+        200:
+          description: Login successful
+        401:
+          description: Invalid credentials
