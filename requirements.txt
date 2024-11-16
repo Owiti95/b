@@ -1,12 +1,25 @@
-Flask==2.3.3
-Flask-SQLAlchemy==3.0.4
-Flask-JWT-Extended==4.4.4
-Flask-RESTful==0.3.9
-Flask-Bcrypt==1.0.1
-Flask-Migrate==3.1.0
-SQLAlchemy==2.0.16
-python-dotenv==1.0.0
-Flask-Cors==3.1.1
-Flask-SQLAlchemy==3.0.4
-Flask-Serializer==1.0.3
+Flask
+Flask-SQLAlchemy
+Flask-JWT-Extended
+Flask-Bcrypt
+Flask-Migrate
+SQLAlchemy
+python-dotenv
+Flask-Cors
+Flask-Serializer
 requests
+
+
+
+
+# Flask==2.3.3
+# Flask-SQLAlchemy==3.0.4
+# Flask-JWT-Extended==4.4.4
+# Flask-Bcrypt==1.0.1
+# Flask-Migrate==3.1.0
+# Flask-Migrate
+# SQLAlchemy
+# python-dotenv
+# Flask-Cors==3.1.1
+# Flask-Serializer==1.0.3
+# requests
