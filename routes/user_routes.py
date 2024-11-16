@@ -117,10 +117,8 @@ def remove_from_cart():
     return jsonify({'message': 'Book removed from cart successfully'}), 200
 
 
-
-
-    db.session.commit()
-    return jsonify(cart_item.to_dict()), 201
+    # db.session.commit()
+    # return jsonify(cart_item.to_dict()), 201
 
 @user_bp.route('/cart', methods=['GET'])
 @jwt_required()
