@@ -1,0 +1,632 @@
+app.py:
+# app.py
+from flask import Flask
+from flask_sqlalchemy import SQLAlchemy
+from flask_bcrypt import Bcrypt
+from flask_jwt_extended import JWTManager
+from flask_migrate import Migrate
+from routes.admin_routes import admin_bp
+from routes.user_routes import user_bp
+from models import db
+
+# Initialize extensions
+bcrypt = Bcrypt()
+jwt = JWTManager()
+migrate = Migrate()
+
+def create_app():
+    app = Flask(__name__)
+    app.config.from_object('config.Config')  # Config from config.py
+
+    # Initialize extensions
+    db.init_app(app)
+    bcrypt.init_app(app)
+    jwt.init_app(app)
+    migrate.init_app(app, db)
+
+    # Register Blueprints
+    app.register_blueprint(admin_bp, url_prefix='/admin')
+    app.register_blueprint(user_bp, url_prefix='/user')
+
+    return app
+
+if __name__ == '__main__':
+    app = create_app()
+    app.run(debug=True)
+
+
+routes/admin_routes.py:
+from flask import Blueprint, request, jsonify
+from flask_jwt_extended import jwt_required, get_jwt_identity
+from models import db, User, StoreBook, LibraryBook, Sale, Borrowing
+from functools import wraps
+
+admin_bp = Blueprint('admin_routes', __name__)
+
+# Helper decorator to check if the user is an admin
+def admin_required(fn):
+    @wraps(fn)
+    @jwt_required()
+    def wrapper(*args, **kwargs):
+        current_user_id = get_jwt_identity()
+        user = User.query.get(current_user_id)
+        if not user or not user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        return fn(*args, **kwargs)
+    return wrapper
+
+# Admin Routes
+
+@admin_bp.route('/users', methods=['GET'])
+@admin_required
+def list_users():
+    users = User.query.all()
+    return jsonify([user.to_dict() for user in users])
+
+@admin_bp.route('/users/<int:user_id>', methods=['GET'])
+@admin_required
+def get_user(user_id):
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    return jsonify(user.to_dict())
+
+@admin_bp.route('/store_books', methods=['POST'])
+@admin_required
+def add_store_book():
+    data = request.get_json()
+    new_book = StoreBook(
+        title=data.get('title'),
+        author=data.get('author'),
+        genre=data.get('genre'),
+        isbn=data.get('isbn'),
+        price=data.get('price'),
+        stock=data.get('stock', 0)
+    )
+    db.session.add(new_book)
+    db.session.commit()
+    return jsonify(new_book.to_dict()), 201
+
+@admin_bp.route('/store_books/<int:book_id>', methods=['PUT'])
+@admin_required
+def update_store_book(book_id):
+    book = StoreBook.query.get(book_id)
+    if not book:
+        return jsonify({'error': 'Book not found'}), 404
+
+    data = request.get_json()
+    book.title = data.get('title', book.title)
+    book.author = data.get('author', book.author)
+    book.genre = data.get('genre', book.genre)
+    book.isbn = data.get('isbn', book.isbn)
+    book.price = data.get('price', book.price)
+    book.stock = data.get('stock', book.stock)
+    db.session.commit()
+    return jsonify(book.to_dict())
+
+@admin_bp.route('/store_books/<int:book_id>', methods=['DELETE'])
+@admin_required
+def delete_store_book(book_id):
+    book = StoreBook.query.get(book_id)
+    if not book:
+        return jsonify({'error': 'Book not found'}), 404
+    db.session.delete(book)
+    db.session.commit()
+    return jsonify({'message': f'Store book {book_id} deleted successfully'})
+
+@admin_bp.route('/library_books', methods=['POST'])
+@admin_required
+def add_library_book():
+    data = request.get_json()
+    new_book = LibraryBook(
+        title=data.get('title'),
+        author=data.get('author'),
+        genre=data.get('genre'),
+        isbn=data.get('isbn'),
+        total_copies=data.get('total_copies', 0),
+        available_copies=data.get('available_copies', 0)
+    )
+    db.session.add(new_book)
+    db.session.commit()
+    return jsonify(new_book.to_dict()), 201
+
+@admin_bp.route('/library_books/<int:book_id>', methods=['PUT'])
+@admin_required
+def update_library_book(book_id):
+    book = LibraryBook.query.get(book_id)
+    if not book:
+        return jsonify({'error': 'Book not found'}), 404
+
+    data = request.get_json()
+    book.title = data.get('title', book.title)
+    book.author = data.get('author', book.author)
+    book.genre = data.get('genre', book.genre)
+    book.isbn = data.get('isbn', book.isbn)
+    book.total_copies = data.get('total_copies', book.total_copies)
+    book.available_copies = data.get('available_copies', book.available_copies)
+    db.session.commit()
+    return jsonify(book.to_dict())
+
+@admin_bp.route('/library_books/<int:book_id>', methods=['DELETE'])
+@admin_required
+def delete_library_book(book_id):
+    book = LibraryBook.query.get(book_id)
+    if not book:
+        return jsonify({'error': 'Book not found'}), 404
+    db.session.delete(book)
+    db.session.commit()
+    return jsonify({'message': f'Library book {book_id} deleted successfully'})
+
+
+@admin_bp.route('/approve_order/<int:sale_id>', methods=['POST'])
+@admin_required
+def approve_order(sale_id):
+    action = request.json.get('action')
+    sale = Sale.query.get(sale_id)
+    if not sale:
+        return jsonify({"error": "Order not found"}), 404
+    sale.status = 'Approved' if action == 'approve' else 'Rejected'
+    db.session.commit()
+    return jsonify({"message": f"Order {action}ed", "order": sale.to_dict()}), 200
+
+@admin_bp.route('/approve_lending/<int:borrowing_id>', methods=['POST'])
+@admin_required
+def approve_lending(borrowing_id):
+    action = request.json.get('action')
+    borrowing = Borrowing.query.get(borrowing_id)
+    if not borrowing:
+        return jsonify({"error": "Lending request not found"}), 404
+    borrowing.status = 'Approved' if action == 'approve' else 'Rejected'
+    db.session.commit()
+    return jsonify({"message": f"Lending request {action}ed", "borrowing": borrowing.to_dict()}), 200
+
+@admin_bp.route('/view_books', methods=['GET'])
+@admin_required
+def view_books():
+    books = StoreBook.query.all()
+    return jsonify([book.to_dict() for book in books]), 200
+
+@admin_bp.route('/view_library_books', methods=['GET'])
+@admin_required
+def view_library_books():
+    library_books = LibraryBook.query.all()
+    return jsonify([book.to_dict() for book in library_books]), 200
+
+
+route/user_routes.py:
+from flask import Blueprint, request, jsonify
+from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
+from models import db, User, StoreBook, LibraryBook, CartItem, Sale, Borrowing
+from sqlalchemy import or_
+
+user_bp = Blueprint('user_routes', __name__)
+
+@user_bp.route('/register', methods=['POST'])
+def register():
+    data = request.get_json()
+    name = data.get('name')
+    email = data.get('email')
+    password = data.get('password')
+
+    if User.query.filter_by(email=email).first():
+        return jsonify({'error': 'Email already registered'}), 400
+
+    user = User(name=name, email=email)
+    user.set_password(password)
+    db.session.add(user)
+    db.session.commit()
+    return jsonify(user.to_dict()), 201
+
+@user_bp.route('/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    email = data.get('email')
+    password = data.get('password')
+
+    user = User.query.filter_by(email=email).first()
+    if user and user.check_password(password):
+        access_token = create_access_token(identity=user.id)
+        return jsonify({'message': 'Login successful', 'access_token': access_token, 'user': user.to_dict()})
+    return jsonify({'error': 'Invalid credentials'}), 401
+
+@user_bp.route('/store_books', methods=['GET'])
+@jwt_required()
+def view_store_books():
+    books = StoreBook.query.all()
+    return jsonify([book.to_dict() for book in books])
+
+@user_bp.route('/library_books', methods=['GET'])
+@jwt_required()
+def view_library_books():
+    books = LibraryBook.query.all()
+    return jsonify([book.to_dict() for book in books])
+
+@user_bp.route('/search_books', methods=['GET'])
+@jwt_required()
+def search_books():
+    query = request.args.get('query', '')
+    store_books = StoreBook.query.filter(
+        or_(StoreBook.title.ilike(f'%{query}%'), StoreBook.genre.ilike(f'%{query}%'))
+    ).all()
+    library_books = LibraryBook.query.filter(
+        or_(LibraryBook.title.ilike(f'%{query}%'), LibraryBook.genre.ilike(f'%{query}%'))
+    ).all()
+    return jsonify({'store_books': [book.to_dict() for book in store_books], 'library_books': [book.to_dict() for book in library_books]})
+
+
+@user_bp.route('/borrow_book', methods=['POST'])
+@jwt_required()
+def borrow_book():
+    user_id = get_jwt_identity()
+    data = request.get_json()
+    book_id = data.get('book_id')
+
+    book = LibraryBook.query.get(book_id)
+    if book and book.available_copies > 0:
+        borrowing = Borrowing(user_id=user_id, book_id=book.id)
+        book.available_copies -= 1
+        db.session.add(borrowing)
+        db.session.commit()
+        return jsonify(borrowing.to_dict()), 201
+    return jsonify({'error': 'Book not available for borrowing'}), 400
+
+
+@user_bp.route('/add_to_cart', methods=['POST'])
+@jwt_required()
+def add_to_cart():
+    user_id = get_jwt_identity()
+    data = request.get_json()
+    book_id = data.get('book_id')
+    quantity = data.get('quantity')
+
+    book = StoreBook.query.get(book_id)
+    if not book or quantity <= 0:
+        return jsonify({'error': 'Invalid book or quantity'}), 400
+
+    cart_item = CartItem.query.filter_by(user_id=user_id, book_id=book.id).first()
+    if cart_item:
+        cart_item.quantity += quantity
+    else:
+        cart_item = CartItem(user_id=user_id, book_id=book.id, quantity=quantity)
+        db.session.add(cart_item)
+
+    db.session.commit()
+
+    result = {"message": "Item added to cart successfully"}
+    return jsonify(result), 201 
+
+
+
+@user_bp.route('/remove_from_cart', methods=['DELETE'])
+@jwt_required()
+def remove_from_cart():
+    user_id = get_jwt_identity()
+    data = request.get_json()
+    book_id = data.get('book_id')
+
+    cart_item = CartItem.query.filter_by(user_id=user_id, book_id=book_id).first()
+    if not cart_item:
+        return jsonify({'error': 'Cart item not found'}), 404
+
+    db.session.delete(cart_item)
+    db.session.commit()
+    return jsonify({'message': 'Book removed from cart successfully'}), 200
+
+
+    # db.session.commit()
+    # return jsonify(cart_item.to_dict()), 201
+
+@user_bp.route('/cart', methods=['GET'])
+@jwt_required()
+def view_cart():
+    user_id = get_jwt_identity()
+    cart_items = CartItem.query.filter_by(user_id=user_id).all()
+    return jsonify([cart_item.to_dict() for cart_item in cart_items])
+
+
+@user_bp.route('/checkout', methods=['POST'])
+@jwt_required()
+def checkout():
+    user_id = get_jwt_identity()
+    cart_items = CartItem.query.filter_by(user_id=user_id).all()
+    if not cart_items:
+        return jsonify({'error': 'Your cart is empty'}), 400
+
+    total_price = sum(item.book.price * item.quantity for item in cart_items)
+    sale = Sale(user_id=user_id, book_id=cart_items[0].book_id, quantity=cart_items[0].quantity, total_price=total_price, status='Pending')
+    db.session.add(sale)
+    db.session.commit()
+    for item in cart_items:
+        db.session.delete(item)
+    db.session.commit()
+
+    return jsonify(sale.to_dict()), 201
+
+
+cloudinary_config.py:
+import cloudinary
+import os
+
+cloudinary.config(
+    cloud_name=os.getenv("dzn1sglkz"),
+    api_key=os.getenv("347229476483569"),
+    api_secret=os.getenv("1NP0j7cr9ZNEYh-peNyx8G4b0ng")
+)
+
+
+
+config.py:
+import os
+from flask_sqlalchemy import SQLAlchemy
+from flask_bcrypt import Bcrypt
+
+# Initialize the extensions globally but do not bind them to the app yet
+db = SQLAlchemy()
+bcrypt = Bcrypt()
+
+class Config:
+    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'sqlite:///app.db')
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your_secret_key')  # Change this
+    
+
+models.py:
+from sqlalchemy.ext.associationproxy import association_proxy
+from sqlalchemy.orm import validates, relationship
+from config import db
+from sqlalchemy import MetaData, Table, ForeignKey
+from sqlalchemy_serializer import SerializerMixin
+from flask_bcrypt import Bcrypt
+import re
+from datetime import datetime, timedelta
+
+bcrypt = Bcrypt()
+metadata = MetaData()
+
+# Association Tables
+cart_items_association = Table('cart_items_association', db.Model.metadata,
+    db.Column('user_id', db.Integer, db.ForeignKey('users.id'), primary_key=True),
+    db.Column('book_id', db.Integer, db.ForeignKey('store_books.id'), primary_key=True),
+    db.Column('quantity', db.Integer, nullable=False)
+)
+
+borrowings_association = Table('borrowings_association', db.Model.metadata,
+    db.Column('user_id', db.Integer, db.ForeignKey('users.id'), primary_key=True),
+    db.Column('book_id', db.Integer, db.ForeignKey('library_books.id'), primary_key=True),
+    db.Column('date_borrowed', db.Date, default=datetime.utcnow),
+    db.Column('due_date', db.Date, default=lambda: datetime.utcnow() + timedelta(days=70)),
+    db.Column('date_returned', db.Date),
+    db.Column('status', db.String, default='Pending')
+)
+
+# Models
+class User(db.Model, SerializerMixin):
+    __tablename__ = 'users'
+    serialize_rules = ('-password_hash', '-borrowings.user', '-sales.user', '-cart_items.user')
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String, nullable=False)
+    email = db.Column(db.String, unique=True, nullable=False)
+    password_hash = db.Column(db.String, nullable=False)
+    is_admin = db.Column(db.Boolean, default=False)
+    profile_image = db.Column(db.String, nullable=True)  # Cloudinary URL for profile picture
+
+    # Relationships
+    borrowings = relationship('Borrowing', back_populates='user', cascade='all, delete-orphan', lazy='joined')
+    sales = relationship('Sale', back_populates='user', cascade='all, delete-orphan', lazy='joined')
+    cart_items = relationship('CartItem', back_populates='user', cascade='all, delete-orphan', lazy='joined')
+
+    @validates('email')
+    def validate_email(self, key, email):
+        valid_email = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
+        if not re.match(valid_email, email):
+            raise ValueError("Invalid email")
+        return email
+
+    def set_password(self, password):
+        self.password_hash = bcrypt.generate_password_hash(password).decode('utf-8')
+
+    def check_password(self, password):
+        return bcrypt.check_password_hash(self.password_hash, password)
+
+    def __repr__(self):
+        return f'<User {self.name}, Email: {self.email}>'
+
+class StoreBook(db.Model, SerializerMixin):
+    __tablename__ = 'store_books'
+    serialize_rules = ('-cart_items.book', '-sales.book')
+
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String, nullable=False)
+    author = db.Column(db.String, nullable=False)
+    genre = db.Column(db.String, nullable=False)
+    isbn = db.Column(db.String, unique=True, nullable=False)
+    price = db.Column(db.Float, nullable=False)
+    stock = db.Column(db.Integer, default=0)
+    image_url = db.Column(db.String, nullable=True)  # Cloudinary URL for book cover
+
+    # Relationships
+    cart_items = relationship('CartItem', back_populates='book', cascade='all, delete-orphan', lazy='joined')
+    sales = relationship('Sale', back_populates='book', cascade='all, delete-orphan', lazy='joined')
+
+    def __repr__(self):
+        return f'<StoreBook {self.title} by {self.author}>'
+
+class LibraryBook(db.Model, SerializerMixin):
+    __tablename__ = 'library_books'
+    serialize_rules = ('-borrowings.book',)
+
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String, nullable=False)
+    author = db.Column(db.String, nullable=False)
+    genre = db.Column(db.String, nullable=False)
+    isbn = db.Column(db.String, unique=True, nullable=False)
+    available_copies = db.Column(db.Integer, default=0)
+    total_copies = db.Column(db.Integer, default=0)
+    image_url = db.Column(db.String, nullable=True)  # Cloudinary URL for book cover
+
+    # Relationships
+    borrowings = relationship('Borrowing', back_populates='book', cascade='all, delete-orphan', lazy='joined')
+
+    def __repr__(self):
+        return f'<LibraryBook {self.title} by {self.author}>'
+
+class CartItem(db.Model, SerializerMixin):
+    __tablename__ = 'cart_items'
+    serialize_rules = ('-user.cart_items', '-book.cart_items')
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    book_id = db.Column(db.Integer, db.ForeignKey('store_books.id'), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False)
+
+    # Relationships
+    user = relationship('User', back_populates='cart_items')
+    book = relationship('StoreBook', back_populates='cart_items')
+
+    def __repr__(self):
+        return f'<CartItem User ID {self.user_id} Book ID {self.book_id} Quantity {self.quantity}>'
+
+class Sale(db.Model, SerializerMixin):
+    __tablename__ = 'sales'
+    serialize_rules = ('-user.sales', '-book.sales')
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    book_id = db.Column(db.Integer, db.ForeignKey('store_books.id'), nullable=False)
+    date_of_sale = db.Column(db.Date, nullable=False, default=datetime.utcnow)
+    quantity = db.Column(db.Integer, nullable=False)
+    total_price = db.Column(db.Float, nullable=False)
+    status = db.Column(db.String, default='Pending')
+
+    # Relationships
+    user = relationship('User', back_populates='sales')
+    book = relationship('StoreBook', back_populates='sales')
+
+    def __repr__(self):
+        return f'<Sale Book ID {self.book_id} to User ID {self.user_id}>'
+
+class Borrowing(db.Model, SerializerMixin):
+    __tablename__ = 'borrowings'
+    serialize_rules = ('-user.borrowings', '-book.borrowings')
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    book_id = db.Column(db.Integer, db.ForeignKey('library_books.id'), nullable=False)
+    date_borrowed = db.Column(db.Date, nullable=False, default=datetime.utcnow)
+    due_date = db.Column(db.Date, nullable=False, default=lambda: datetime.utcnow() + timedelta(days=70))
+    date_returned = db.Column(db.Date)
+    status = db.Column(db.String, default='Pending')
+
+    # Relationships
+    user = relationship('User', back_populates='borrowings')
+    book = relationship('LibraryBook', back_populates='borrowings')
+
+    def __repr__(self):
+        return f'<Borrowing Book ID {self.book_id} by User ID {self.user_id}>'
+
+
+requirements.txt:
+Flask
+Flask-SQLAlchemy
+Flask-JWT-Extended
+Flask-Bcrypt
+Flask-Migrate
+SQLAlchemy
+python-dotenv
+Flask-Cors
+Flask-Serializer
+requests
+cloudinary
+
+seed.py:
+from app import create_app
+from config import db
+from models import User, StoreBook, LibraryBook, CartItem, Borrowing
+from datetime import datetime, timedelta
+import cloudinary.uploader
+import os
+
+# Import Cloudinary configuration
+from cloudinary_config import Cloudinary_config
+
+# Configure Cloudinary
+cloudinary.config(
+    cloud_name=Cloudinary_config['cloud_name'],
+    api_key=Cloudinary_config['api_key'],
+    api_secret=Cloudinary_config['api_secret']
+)
+
+app = create_app()  # Initialize the app
+
+# Create tables
+with app.app_context():
+    db.create_all()
+
+# Helper function to upload image to Cloudinary
+def upload_to_cloudinary(image_path):
+    if not os.path.exists(image_path):
+        print(f"Image file does not exist: {image_path}")
+        return None
+    try:
+        response = cloudinary.uploader.upload(image_path)
+        return response.get('secure_url')  # Return the secure URL
+    except Exception as e:
+        print(f"Error uploading {image_path} to Cloudinary: {e}")
+        return None
+
+# Run the seeding process
+def seed_data():
+    try:
+        # Add sample books for the store
+        store_books_data = [
+            {'title': 'The Great Gatsby', 'author': 'F. Scott Fitzgerald', 'genre': 'Fiction', 'isbn': '1234567890', 'price': 15.99, 'stock': 20, 'image_path': './images/gatsby.jpg'},
+            {'title': 'Sapiens', 'author': 'Yuval Noah Harari', 'genre': 'Non-Fiction', 'isbn': '0987654321', 'price': 20.99, 'stock': 15, 'image_path': './images/sapiens.jpg'},
+            # Add remaining books here...
+        ]
+
+        store_books = []
+        for book_data in store_books_data:
+            image_url = upload_to_cloudinary(book_data.pop('image_path'))
+            if image_url:
+                store_books.append(StoreBook(image_url=image_url, **book_data))
+
+        # Add sample library books
+        library_books_data = [
+            {'title': 'To Kill a Mockingbird', 'author': 'Harper Lee', 'genre': 'Fiction', 'isbn': '1122334455', 'available_copies': 5, 'total_copies': 10, 'image_path': './images/mockingbird.jpg'},
+            {'title': 'A Brief History of Time', 'author': 'Stephen Hawking', 'genre': 'Science', 'isbn': '5566778899', 'available_copies': 2, 'total_copies': 4, 'image_path': './images/brief_history.jpg'},
+            # Add remaining library books here...
+        ]
+
+        library_books = []
+        for book_data in library_books_data:
+            image_url = upload_to_cloudinary(book_data.pop('image_path'))
+            if image_url:
+                library_books.append(LibraryBook(image_url=image_url, **book_data))
+
+        # Add users
+        users = [
+            User(name='Alice Johnson', email='alice@example.com', is_admin=False),
+            User(name='Admin User', email='admin@example.com', is_admin=True),
+            # Add remaining users here...
+        ]
+
+        # Set passwords for users
+        for user in users:
+            user.set_password('defaultpassword123')
+
+        # Commit base records
+        db.session.add_all(store_books + library_books + users)
+        db.session.commit()
+
+        print("Database seeded successfully!")
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error seeding data: {e}")
+    finally:
+        db.session.close()
+
+# Run the seeding function
+if __name__ == "__main__":
+    with app.app_context():
+        seed_data()

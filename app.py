@@ -7,6 +7,7 @@ from flask_migrate import Migrate
 from routes.admin_routes import admin_bp
 from routes.user_routes import user_bp
 from models import db
+from flask_cors import CORS
 
 # Initialize extensions
 bcrypt = Bcrypt()
@@ -22,6 +23,7 @@ def create_app():
     bcrypt.init_app(app)
     jwt.init_app(app)
     migrate.init_app(app, db)
+    CORS(app, supports_credentials=True)
 
     # Register Blueprints
     app.register_blueprint(admin_bp, url_prefix='/admin')

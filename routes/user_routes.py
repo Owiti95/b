@@ -21,6 +21,18 @@ def register():
     db.session.commit()
     return jsonify(user.to_dict()), 201
 
+# @user_bp.route('/login', methods=['POST'])
+# def login():
+#     data = request.get_json()
+#     email = data.get('email')
+#     password = data.get('password')
+
+#     user = User.query.filter_by(email=email).first()
+#     if user and user.check_password(password):
+#         access_token = create_access_token(identity=user.id)
+#         return jsonify({'message': 'Login successful', 'access_token': access_token, 'user': user.to_dict()})
+
+
 @user_bp.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
@@ -29,18 +41,30 @@ def login():
 
     user = User.query.filter_by(email=email).first()
     if user and user.check_password(password):
-        access_token = create_access_token(identity=user.id)
+        # Create JWT token with the user's id and is_admin claim
+        access_token = create_access_token(identity=user.id, additional_claims={'is_admin': user.is_admin})
         return jsonify({'message': 'Login successful', 'access_token': access_token, 'user': user.to_dict()})
     return jsonify({'error': 'Invalid credentials'}), 401
 
+
+
+#     return jsonify({'error': 'Invalid credentials'}), 401
+
+# @user_bp.route('/store_books', methods=['GET'])
+# @jwt_required()
+# def view_store_books():
+#     books = StoreBook.query.all()
+#     return jsonify([book.to_dict() for book in books])
+
 @user_bp.route('/store_books', methods=['GET'])
-@jwt_required()
 def view_store_books():
+    """Fetch all store books without requiring authentication."""
     books = StoreBook.query.all()
     return jsonify([book.to_dict() for book in books])
 
+
 @user_bp.route('/library_books', methods=['GET'])
-@jwt_required()
+# @jwt_required()
 def view_library_books():
     books = LibraryBook.query.all()
     return jsonify([book.to_dict() for book in books])
@@ -145,3 +169,4 @@ def checkout():
     db.session.commit()
 
     return jsonify(sale.to_dict()), 201
+

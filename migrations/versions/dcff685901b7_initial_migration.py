@@ -1,8 +1,8 @@
 """initial migration
 
-Revision ID: 314ea1078a02
+Revision ID: dcff685901b7
 Revises: 
-Create Date: 2024-11-16 14:05:01.251375
+Create Date: 2024-11-21 03:07:21.745195
 
 """
 from alembic import op
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '314ea1078a02'
+revision = 'dcff685901b7'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -26,6 +26,7 @@ def upgrade():
     sa.Column('isbn', sa.String(), nullable=False),
     sa.Column('available_copies', sa.Integer(), nullable=True),
     sa.Column('total_copies', sa.Integer(), nullable=True),
+    sa.Column('image_url', sa.String(), nullable=True),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('isbn')
     )
@@ -37,6 +38,7 @@ def upgrade():
     sa.Column('isbn', sa.String(), nullable=False),
     sa.Column('price', sa.Float(), nullable=False),
     sa.Column('stock', sa.Integer(), nullable=True),
+    sa.Column('image_url', sa.String(), nullable=True),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('isbn')
     )
@@ -46,6 +48,7 @@ def upgrade():
     sa.Column('email', sa.String(), nullable=False),
     sa.Column('password_hash', sa.String(), nullable=False),
     sa.Column('is_admin', sa.Boolean(), nullable=True),
+    sa.Column('profile_image', sa.String(), nullable=True),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('email')
     )
