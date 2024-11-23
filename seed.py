@@ -111,7 +111,7 @@ def seed_data():
 
         # Set passwords for users
         for user in users:
-            user.set_password('defaultpassword123')
+            user.set_password('pass123')
 
         # Commit base records
         db.session.add_all(store_books + library_books + users)

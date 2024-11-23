@@ -2,6 +2,8 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from models import db, User, StoreBook, LibraryBook, CartItem, Sale, Borrowing
 from sqlalchemy import or_
+from datetime import timedelta
+
 
 user_bp = Blueprint('user_routes', __name__)
 
@@ -42,7 +44,7 @@ def login():
     user = User.query.filter_by(email=email).first()
     if user and user.check_password(password):
         # Create JWT token with the user's id and is_admin claim
-        access_token = create_access_token(identity=user.id, additional_claims={'is_admin': user.is_admin})
+        access_token = create_access_token(identity=user.id, expires_delta=timedelta(hours=1), additional_claims={'is_admin': user.is_admin})
         return jsonify({'message': 'Login successful', 'access_token': access_token, 'user': user.to_dict()})
     return jsonify({'error': 'Invalid credentials'}), 401
 
@@ -141,8 +143,7 @@ def remove_from_cart():
     return jsonify({'message': 'Book removed from cart successfully'}), 200
 
 
-    # db.session.commit()
-    # return jsonify(cart_item.to_dict()), 201
+
 
 @user_bp.route('/cart', methods=['GET'])
 @jwt_required()
@@ -170,3 +171,124 @@ def checkout():
 
     return jsonify(sale.to_dict()), 201
 
+
+
+
+@user_bp.route('/add_to_borrowings', methods=['POST'])
+@jwt_required()
+def add_to_borrowings():
+    user_id = get_jwt_identity()
+    data = request.get_json()
+    book_id = data.get('book_id')
+
+    book = LibraryBook.query.get(book_id)
+    if not book or book.available_copies <= 0:
+        return jsonify({'error': 'Book not available for borrowing'}), 400
+
+    borrowing = Borrowing.query.filter_by(user_id=user_id, book_id=book.id, status='Pending').first()
+    if borrowing:
+        return jsonify({'error': 'Book already in borrowings'}), 400
+
+    new_borrowing = Borrowing(user_id=user_id, book_id=book.id)
+    book.available_copies -= 1
+    db.session.add(new_borrowing)
+    db.session.commit()
+
+    return jsonify(new_borrowing.to_dict()), 201
+
+
+@user_bp.route('/remove_from_borrowings', methods=['DELETE'])
+@jwt_required()
+def remove_from_borrowings():
+    user_id = get_jwt_identity()
+    data = request.get_json()
+    book_id = data.get('book_id')
+
+    borrowing = Borrowing.query.filter_by(user_id=user_id, book_id=book_id, status='Pending').first()
+    if not borrowing:
+        return jsonify({'error': 'Borrowing record not found'}), 404
+
+    book = LibraryBook.query.get(book_id)
+    book.available_copies += 1
+    db.session.delete(borrowing)
+    db.session.commit()
+
+    return jsonify({'message': 'Book removed from borrowings successfully'}), 200
+
+
+@user_bp.route('/borrowings', methods=['GET'])
+@jwt_required()
+def view_borrowings():
+    user_id = get_jwt_identity()
+    borrowings = Borrowing.query.filter_by(user_id=user_id, status='Pending').all()
+    return jsonify([borrowing.to_dict() for borrowing in borrowings])
+
+
+@user_bp.route('/approve_borrowing', methods=['PATCH'])
+@jwt_required()
+def approve_borrowing():
+    """
+    Approves a borrowing request by updating its status to 'Approved'.
+    """
+    user_id = get_jwt_identity()
+    if not user_id:  # Ensure this is an admin route if needed
+        return jsonify({'error': 'Unauthorized access'}), 403
+
+    data = request.get_json()
+    borrowing_id = data.get('borrowing_id')
+
+    # Fetch the borrowing record
+    borrowing = Borrowing.query.get(borrowing_id)
+    if not borrowing:
+        return jsonify({'error': 'Borrowing record not found'}), 404
+
+    if borrowing.status != 'Pending':
+        return jsonify({'error': 'Borrowing is not in a pending state'}), 400
+
+    # Update the status to Approved
+    borrowing.status = 'Approved'
+    db.session.commit()
+
+    return jsonify({'message': 'Borrowing request approved successfully', 'borrowing': borrowing.to_dict()}), 200
+
+
+@user_bp.route('/all_borrowings', methods=['GET'])
+@jwt_required()
+def fetch_all_borrowings():
+    """
+    Fetch all borrowings for the authenticated user, including their approval status.
+    """
+    user_id = get_jwt_identity()
+    borrowings = Borrowing.query.filter_by(user_id=user_id).all()
+
+    if not borrowings:
+        return jsonify({'message': 'No borrowings found.'}), 404
+
+    return jsonify([borrowing.to_dict() for borrowing in borrowings]), 200
+
+
+
+@user_bp.route('/initiate_return', methods=['POST'])
+@jwt_required()
+def initiate_return():
+    """
+    Initiate a return request for an approved borrowing.
+    """
+    user_id = get_jwt_identity()
+    borrowing_id = request.json.get('borrowing_id')
+
+    borrowing = Borrowing.query.filter_by(id=borrowing_id, user_id=user_id).first()
+
+    if not borrowing:
+        return jsonify({'error': 'Borrowing not found.'}), 404
+
+    if borrowing.status != 'Approved':
+        return jsonify({'error': 'Return can only be initiated for approved borrowings.'}), 400
+
+    try:
+        borrowing.status = 'Return Requested'
+        db.session.commit()
+        return jsonify({'message': 'Return request initiated successfully.', 'borrowing': borrowing.to_dict()})
+    except Exception as e:
+        print(f"Error initiating return: {e}")
+        return jsonify({'error': 'Failed to initiate return.'}), 500
