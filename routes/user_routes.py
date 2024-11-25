@@ -3,6 +3,10 @@ from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identi
 from models import db, User, StoreBook, LibraryBook, CartItem, Sale, Borrowing
 from sqlalchemy import or_
 from datetime import timedelta
+import requests
+import base64
+from datetime import datetime
+import os
 
 
 user_bp = Blueprint('user_routes', __name__)
@@ -23,16 +27,6 @@ def register():
     db.session.commit()
     return jsonify(user.to_dict()), 201
 
-# @user_bp.route('/login', methods=['POST'])
-# def login():
-#     data = request.get_json()
-#     email = data.get('email')
-#     password = data.get('password')
-
-#     user = User.query.filter_by(email=email).first()
-#     if user and user.check_password(password):
-#         access_token = create_access_token(identity=user.id)
-#         return jsonify({'message': 'Login successful', 'access_token': access_token, 'user': user.to_dict()})
 
 
 @user_bp.route('/login', methods=['POST'])
@@ -49,14 +43,6 @@ def login():
     return jsonify({'error': 'Invalid credentials'}), 401
 
 
-
-#     return jsonify({'error': 'Invalid credentials'}), 401
-
-# @user_bp.route('/store_books', methods=['GET'])
-# @jwt_required()
-# def view_store_books():
-#     books = StoreBook.query.all()
-#     return jsonify([book.to_dict() for book in books])
 
 @user_bp.route('/store_books', methods=['GET'])
 def view_store_books():
@@ -292,3 +278,114 @@ def initiate_return():
     except Exception as e:
         print(f"Error initiating return: {e}")
         return jsonify({'error': 'Failed to initiate return.'}), 500
+
+
+
+
+# @user_bp.route('/orders', methods=['GET'])
+# @jwt_required()
+# def view_orders():
+#     """
+#     Fetch all orders for the authenticated user.
+#     """
+#     try:
+#         user_id = get_jwt_identity()  # Get the user id from the JWT token
+#         orders = Sale.query.filter_by(user_id=user_id).all()  # Fetch orders for this user
+
+#         if not orders:
+#             return jsonify({'message': 'No orders found.'}), 404
+
+#         return jsonify([order.to_dict() for order in orders]), 200
+#     except Exception as e:
+#         print(f"Error fetching orders: {e}")
+#         return jsonify({'error': 'Failed to fetch orders'}), 500
+
+@user_bp.route('/sales_history', methods=['GET'])
+@jwt_required()
+def get_sales_history():
+    """
+    Fetch sales history for the authenticated user.
+    """
+    try:
+        user_id = get_jwt_identity()  # Get the user id from the JWT token
+        sales = Sale.query.filter_by(user_id=user_id).all()  # Fetch sales for this user
+
+        if not sales:
+            return jsonify({'message': 'No sales history found.'}), 404
+
+        return jsonify([sale.to_dict() for sale in sales]), 200
+    except Exception as e:
+        print(f"Error fetching sales history: {e}")
+        return jsonify({'error': 'Failed to fetch sales history'}), 500
+
+
+@user_bp.route("/buyGoods", methods=["POST"])
+def buy_goods():
+    data = request.get_json()
+    amount = data.get("amount")
+    phone_number = data.get("phone_number")
+    transaction_id = str(datetime.timestamp(datetime.now()))  # Unique transaction ID
+
+    # Save transaction in database
+    new_transaction = new_transaction(id=transaction_id, amount=amount, phone_number=phone_number)
+    db.session.add(new_transaction)
+    db.session.commit()
+
+    # Generate M-Pesa payload
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    password_str = f"{os.getenv('SHORTCODE')}{os.getenv('PASSKEY')}{timestamp}"
+    password = base64.b64encode(password_str.encode()).decode("utf-8")
+    access_token = get_access_token()
+
+    headers = {"Authorization": f"Bearer {access_token}"}
+    endpoint = "https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest"
+    payload = {
+        "BusinessShortCode": os.getenv("SHORTCODE"),
+        "Password": password,
+        "Timestamp": timestamp,
+        "TransactionType": "CustomerPayBillOnline",
+        "Amount": amount,
+        "PartyA": phone_number,
+        "PartyB": os.getenv("SHORTCODE"),
+        "PhoneNumber": phone_number,
+        "CallBackURL": os.getenv("BASE_URL") + "/user/callback",
+        "AccountReference": "Mpesa Integration Api",
+        "TransactionDesc": "Test Payment",
+    }
+
+    response = requests.post(endpoint, json=payload, headers=headers)
+    response_data = response.json()
+    return jsonify(response_data)
+
+
+
+
+
+@user_bp.route("/callback", methods=["POST"])
+def mpesa_callback():
+    data = request.get_json()
+    callback = data.get("Body", {}).get("stkCallback", {})
+    result_code = callback.get("ResultCode")
+    transaction_id = callback.get("CheckoutRequestID")
+
+    if not transaction_id:
+        return jsonify({"ResultCode": 1, "ResultDesc": "Invalid transaction ID"})
+
+    # Update transaction status in database
+    transaction = transaction.query.filter_by(id=transaction_id).first()
+    if transaction:
+        transaction.status = "Completed" if result_code == 0 else "Canceled"
+        db.session.commit()
+
+    return jsonify({"ResultCode": 0, "ResultDesc": "Callback received"})
+
+# Helper function for getting access token
+def get_access_token():
+    endpoint = "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials"
+    response = requests.get(
+        endpoint,
+        auth=requests.auth.HTTPBasicAuth(
+            os.getenv("CONSUMER_KEY"), os.getenv("CONSUMER_SECRET")
+        ),
+    )
+    return response.json().get("access_token")
